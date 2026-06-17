@@ -79,6 +79,15 @@ android {
         }
     }
 
+    signingConfigs {
+        localRelease {
+            storeFile file("/tmp/moonlight-release.jks")
+            storePassword "moonlight123"
+            keyAlias "moonlight"
+            keyPassword "moonlight123"
+        }
+    }
+
     buildTypes {
         debug {
             applicationIdSuffix ".debug"
@@ -120,11 +129,12 @@ android {
             //
             // TL;DR: Leave the following line alone!
             applicationIdSuffix ".unofficial"
-            resValue "string", "app_label", "Moonlight"
-            resValue "string", "app_label_root", "Moonlight (Root)"
+            resValue "string", "app_label", "Moonlight (Patched)"
+            resValue "string", "app_label_root", "Moonlight (Patched Root)"
 
             minifyEnabled true
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            signingConfig signingConfigs.localRelease
         }
     }
 

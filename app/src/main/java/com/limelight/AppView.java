@@ -23,6 +23,7 @@ import com.limelight.utils.SpinnerDialog;
 import com.limelight.utils.UiHelper;
 
 import android.app.Activity;
+import android.app.PendingIntent;
 import android.app.Service;
 import android.content.ComponentName;
 import android.content.Intent;
@@ -31,6 +32,8 @@ import android.content.SharedPreferences;
 import android.content.res.Configuration;
 import android.graphics.Bitmap;
 import android.graphics.drawable.BitmapDrawable;
+import android.hardware.usb.UsbDevice;
+import android.hardware.usb.UsbManager;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.IBinder;
@@ -375,6 +378,26 @@ public class AppView extends Activity implements AdapterFragmentCallbacks {
 
         // Display a decoder crash notification if we've returned after a crash
         UiHelper.showDecoderCrashDialog(this);
+
+        // Pre-request USB permissions for any connected controllers while we're
+        // not in fullscreen, so the dialog doesn't need to appear during streaming.
+        PreferenceConfiguration prefConfig = PreferenceConfiguration.readPreferences(this);
+        if (prefConfig.usbDriver) {
+            UsbManager usbManager = (UsbManager) getSystemService(UsbManager.class);
+            if (usbManager != null) {
+                int intentFlags = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S ?
+                        PendingIntent.FLAG_IMMUTABLE : 0;
+                PendingIntent pi = PendingIntent.getBroadcast(this, 0,
+                        new Intent(com.limelight.binding.input.driver.UsbDriverService.ACTION_USB_PERMISSION),
+                        intentFlags);
+                for (UsbDevice device : usbManager.getDeviceList().values()) {
+                    if (com.limelight.binding.input.driver.UsbDriverService.shouldClaimDevice(device, prefConfig.bindAllUsb)
+                            && !usbManager.hasPermission(device)) {
+                        usbManager.requestPermission(device, pi);
+                    }
+                }
+            }
+        }
 
         inForeground = true;
         startComputerUpdates();

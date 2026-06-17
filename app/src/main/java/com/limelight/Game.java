@@ -2652,6 +2652,9 @@ public class Game extends Activity implements SurfaceHolder.Callback,
         // us from entering PiP while the user is interacting with the OS permission dialog.
         suppressPipRefCount++;
         updatePipAutoEnter();
+
+        // USB permission is pre-requested from AppView before the stream starts,
+        // so we no longer need to exit immersive fullscreen here.
     }
 
     @Override

@@ -26,7 +26,7 @@ import java.util.ArrayList;
 
 public class UsbDriverService extends Service implements UsbDriverListener {
 
-    private static final String ACTION_USB_PERMISSION =
+    public static final String ACTION_USB_PERMISSION =
             "com.limelight.USB_PERMISSION";
 
     private UsbManager usbManager;
@@ -141,6 +141,14 @@ public class UsbDriverService extends Service implements UsbDriverListener {
         if (shouldClaimDevice(device, prefConfig.bindAllUsb)) {
             // Do we have permission yet?
             if (!usbManager.hasPermission(device)) {
+                // If we're actively streaming, never show the permission dialog — it overlays
+                // the fullscreen Game activity and causes the TV to crash. The controller will
+                // be picked up the next time the user visits AppView, which pre-requests permission.
+                if (started) {
+                    LimeLog.info("Skipping USB permission request during streaming for: " + device.getDeviceName());
+                    return;
+                }
+
                 // Let's ask for permission
                 try {
                     // Tell the state listener that we're about to display a permission dialog

@@ -9,6 +9,8 @@ import com.limelight.nvstream.input.ControllerPacket;
 
 import java.nio.ByteBuffer;
 
+import android.os.SystemClock;
+
 public class Xbox360Controller extends AbstractXboxController {
     private static final int XB360_IFACE_SUBCLASS = 93;
     private static final int XB360_IFACE_PROTOCOL = 1; // Wired only
@@ -55,6 +57,12 @@ public class Xbox360Controller extends AbstractXboxController {
 
         return false;
     }
+
+    // Debug tracking
+    private long lastRumbleTime = 0;
+    private int rumbleCount = 0;
+    private long rumbleStartTime = 0;
+    private long maxRumbleTransferMs = 0;
 
     public Xbox360Controller(UsbDevice device, UsbDeviceConnection connection, int deviceId, UsbDriverListener listener) {
         super(device, connection, deviceId, listener);
@@ -147,15 +155,46 @@ public class Xbox360Controller extends AbstractXboxController {
 
     @Override
     public void rumble(short lowFreqMotor, short highFreqMotor) {
+        long now = SystemClock.uptimeMillis();
+        rumbleCount++;
+
+        if (rumbleStartTime == 0) {
+            rumbleStartTime = now;
+        }
+
+        long sinceLastRumble = (lastRumbleTime > 0) ? (now - lastRumbleTime) : -1;
+
         byte[] data = {
                 0x00, 0x08, 0x00,
                 (byte)(lowFreqMotor >> 8), (byte)(highFreqMotor >> 8),
                 0x00, 0x00, 0x00
         };
+        long transferStart = SystemClock.uptimeMillis();
         int res = connection.bulkTransfer(outEndpt, data, data.length, 100);
-        if (res != data.length) {
-            LimeLog.warning("Rumble transfer failed: "+res);
+        long transferDuration = SystemClock.uptimeMillis() - transferStart;
+
+        if (transferDuration > maxRumbleTransferMs) {
+            maxRumbleTransferMs = transferDuration;
         }
+
+        // Log every 10th rumble call to avoid log spam
+        if (rumbleCount % 10 == 0) {
+            long elapsed = now - rumbleStartTime;
+            float rumbleRate = (elapsed > 0) ? (rumbleCount * 1000f / elapsed) : 0;
+            LimeLog.info("RUMBLE_DEBUG: count=" + rumbleCount +
+                    " rate=" + String.format("%.1f", rumbleRate) + "/s" +
+                    " sinceLastMs=" + sinceLastRumble +
+                    " transferMs=" + transferDuration +
+                    " maxTransferMs=" + maxRumbleTransferMs +
+                    " low=" + lowFreqMotor + " high=" + highFreqMotor +
+                    " res=" + res);
+        }
+
+        if (res != data.length) {
+            LimeLog.warning("Rumble transfer failed: "+res+" transferMs="+transferDuration);
+        }
+
+        lastRumbleTime = now;
     }
 
     @Override

@@ -21,6 +21,13 @@ public abstract class AbstractXboxController extends AbstractController {
     private Thread inputThread;
     private boolean stopped;
 
+    // Debug tracking for input loop
+    private long inputLoopStartTime = 0;
+    private int inputReadCount = 0;
+    private int inputTimeoutCount = 0;
+    private long maxReadMs = 0;
+    private long lastInputLogTime = 0;
+
     protected UsbEndpoint inEndpt, outEndpt;
 
     public AbstractXboxController(UsbDevice device, UsbDeviceConnection connection, int deviceId, UsbDriverListener listener) {
@@ -54,6 +61,10 @@ public abstract class AbstractXboxController extends AbstractController {
                 // Report that we're added _before_ reporting input
                 notifyDeviceAdded();
 
+                inputLoopStartTime = SystemClock.uptimeMillis();
+                lastInputLogTime = inputLoopStartTime;
+                LimeLog.info("USB_DEBUG: Input loop started");
+
                 while (!isInterrupted() && !stopped) {
                     byte[] buffer = new byte[64];
 
@@ -70,6 +81,30 @@ public abstract class AbstractXboxController extends AbstractController {
                         // Read the next input state packet
                         long lastMillis = SystemClock.uptimeMillis();
                         res = connection.bulkTransfer(inEndpt, buffer, buffer.length, 3000);
+                        long readDuration = SystemClock.uptimeMillis() - lastMillis;
+
+                        inputReadCount++;
+                        if (res == -1) {
+                            inputTimeoutCount++;
+                        }
+                        if (readDuration > maxReadMs) {
+                            maxReadMs = readDuration;
+                        }
+
+                        // Log stats every 30 seconds
+                        long now = SystemClock.uptimeMillis();
+                        if (now - lastInputLogTime >= 30000) {
+                            long elapsed = now - inputLoopStartTime;
+                            float readRate = (elapsed > 0) ? (inputReadCount * 1000f / elapsed) : 0;
+                            LimeLog.info("USB_DEBUG: uptime=" + (elapsed / 1000) + "s" +
+                                    " reads=" + inputReadCount +
+                                    " timeouts=" + inputTimeoutCount +
+                                    " rate=" + String.format("%.1f", readRate) + "/s" +
+                                    " maxReadMs=" + maxReadMs +
+                                    " lastReadMs=" + readDuration +
+                                    " lastRes=" + res);
+                            lastInputLogTime = now;
+                        }
 
                         // If we get a zero length response, treat it as an error
                         if (res == 0) {
@@ -77,7 +112,9 @@ public abstract class AbstractXboxController extends AbstractController {
                         }
 
                         if (res == -1 && SystemClock.uptimeMillis() - lastMillis < 1000) {
-                            LimeLog.warning("Detected device I/O error");
+                            LimeLog.warning("USB_DEBUG: Detected device I/O error after " +
+                                    (SystemClock.uptimeMillis() - inputLoopStartTime) / 1000 + "s uptime, " +
+                                    inputReadCount + " total reads");
                             AbstractXboxController.this.stop();
                             break;
                         }
@@ -91,7 +128,18 @@ public abstract class AbstractXboxController extends AbstractController {
                         // Report input if handleRead() returns true
                         reportInput();
                     }
+
+                    // Throttle USB reads to reduce bus contention with video decoder.
+                    // Xbox 360 controllers send at 125Hz (8ms). Adding a small delay
+                    // reduces USB bus pressure on weak SoCs while maintaining <20ms latency.
+                    try {
+                        Thread.sleep(4);
+                    } catch (InterruptedException e) {
+                        break;
+                    }
                 }
+                LimeLog.info("USB_DEBUG: Input loop exited after " +
+                        ((SystemClock.uptimeMillis() - inputLoopStartTime) / 1000) + "s");
             }
         };
     }
@@ -151,6 +199,12 @@ public abstract class AbstractXboxController extends AbstractController {
         }
 
         stopped = true;
+
+        long uptime = (inputLoopStartTime > 0) ? (SystemClock.uptimeMillis() - inputLoopStartTime) / 1000 : 0;
+        LimeLog.info("USB_DEBUG: Controller stopping after " + uptime + "s" +
+                " reads=" + inputReadCount +
+                " timeouts=" + inputTimeoutCount +
+                " maxReadMs=" + maxReadMs);
 
         // Cancel any rumble effects
         rumble((short)0, (short)0);
